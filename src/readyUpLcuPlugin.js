@@ -12,12 +12,18 @@ const LOBBY_EVENT = 'OnJsonApiEvent_lol-lobby_v2_comms';
 
 const PARTY_RESTRICTION_QUEUES = new Set([490]); // QuickPlay
 
+const MESSAGE_RETRY_PERIOD = 200;
+const READY_EMOJI = '✅';
+const NOT_READY_EMOJI = '❌';
+
+// TODO mode switch doesn't clear ready status
 export default class ReadyUpLcuPlugin extends LcuPlugin {
   onConnect(clientData) {
     axios.defaults.baseURL = `${clientData.protocol}://${clientData.address}:${clientData.port}`;
     axios.defaults.auth = {username: clientData.username, password: clientData.password};
 
     this.partyMembers = {};
+    this.sentMessages = new Set();
 
     return this.createPromise((resolve, reject) => {
       this.getCurrentSummoner().then((summonerId) => {
@@ -62,6 +68,21 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
       setTimeout(() => {
         this.getCurrentSummonerHelper(retriesLeft - 1, resolve, reject);
       }, 1000);
+    });
+  }
+
+  sendMessage(chatUrl, message, retriesLeft = 2) {
+    axios.post(chatUrl, {
+      body: message,
+    }).then((response) => {
+      this.sentMessages.add(response.data.id);
+    }).catch((error) => {
+      if (retriesLeft > 0) {
+        this.log(`send message error, retrying (${retriesLeft - 1} retries left)`);
+        setTimeout(this.sendMessage, MESSAGE_RETRY_PERIOD, chatUrl, message, retriesLeft - 1);
+      } else {
+        this.error('error: ', error);
+      }
     });
   }
 
@@ -120,14 +141,23 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
       if (event.data.type !== 'groupchat') {
         return;
       }
-      this.log('partyMembers: ', this.partyMembers);
-      this.log('received party chat: ', event);
-      if (!/(^r$)|(^ready$)|(^nr$)|(^not ready$)/i.test(event.data.body)) {
+
+      if (this.sentMessages.has(event.data.id)) {
+        this.log(`ignoring message ${event.data.id} because we sent it`);
+        this.sentMessages.delete(event.data.id);
+        return;
+      }
+      // this.log('received party chat: ', event);
+      if (!/(^r$)|(^ready$)|(^nr$)|(^not ready$)|(^\/list ready$)/i.test(event.data.body)) {
         // this.log(`startQueuePlugin ignoring message "${event.data.body}" because it didn't match the regex`);
         return;
       }
 
-      if (event.data.body.toLowerCase().startsWith('r')) {
+      if (event.data.body.toLowerCase().startsWith("/list")) {
+        const chatUrl = event.uri.substring(0, event.uri.lastIndexOf('/'));
+        await this.listReadyToChat(currentSummonerId, chatUrl, event.data.fromSummonerId);
+        return;
+      } else if (event.data.body.toLowerCase().startsWith('r')) {
         this.partyMembers[event.data.fromSummonerId] = true;
       } else {
         this.partyMembers[event.data.fromSummonerId] = false;
@@ -172,5 +202,19 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
     for (const key in this.partyMembers) {
       this.partyMembers[key] = false;
     }
+  }
+
+  // TODO wait rand time < 1 sec if not party leader, and ignore if someone else posts
+  async listReadyToChat(currentSummonerId, chatUrl, requestingSummonerId) {
+    const players = await this.getLobbyMembers();
+
+    const [playerReadyStatuses, readyPlayers, totalPlayers] = players.data.reduce(([readyStatuses, readyPlayers, totalPlayers], player) => {
+      const isReady = this.partyMembers[player.summonerId];
+      readyStatuses.push(`${player.summonerName}: ${isReady ? READY_EMOJI : NOT_READY_EMOJI}`);
+      return [readyStatuses, readyPlayers + (isReady ? 1 : 0), totalPlayers + 1];
+    }, [[], 10, 10]);
+
+    const readyStatusStr = ['.', `Party ready status (${readyPlayers} / ${totalPlayers}):`].concat(playerReadyStatuses).join("\n");
+    this.sendMessage(chatUrl, readyStatusStr);
   }
 }
