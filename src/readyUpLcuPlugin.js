@@ -227,7 +227,7 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
       const isReady = this.partyMembers[player.summonerId];
       readyStatuses.push(`${player.summonerName}: ${isReady ? READY_EMOJI : NOT_READY_EMOJI}`);
       return [readyStatuses, readyPlayers + (isReady ? 1 : 0), totalPlayers + 1];
-    }, [[], 10, 10]);
+    }, [[], 0, 0]);
 
     const readyStatusStr = [`${READY_LIST_HEADER} (${readyPlayers} / ${totalPlayers}):`].concat(playerReadyStatuses).join("\n");
     this.sendMessage(chatUrl, readyStatusStr);
