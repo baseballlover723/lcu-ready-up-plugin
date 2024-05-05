@@ -12,7 +12,9 @@ const LOBBY_EVENT = 'OnJsonApiEvent_lol-lobby_v2_comms';
 
 const PARTY_RESTRICTION_QUEUES = new Set([490]); // QuickPlay
 
+const READY_LIST_HEADER = ".\nParty ready status";
 const MESSAGE_RETRY_PERIOD = 200;
+const NOT_SELF_MIN_DELAY = 750; // ms
 const READY_EMOJI = '✅';
 const NOT_READY_EMOJI = '❌';
 
@@ -23,6 +25,7 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
     axios.defaults.auth = {username: clientData.username, password: clientData.password};
 
     this.partyMembers = {};
+    this.statusRequesterResponded = false;
     this.sentMessages = new Set();
 
     return this.createPromise((resolve, reject) => {
@@ -148,6 +151,9 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
         return;
       }
       // this.log('received party chat: ', event);
+      if (event.data.body.startsWith(READY_LIST_HEADER)) {
+        this.statusRequesterResponded = true;
+      }
       if (!/(^r$)|(^ready$)|(^nr$)|(^not ready$)|(^\/list ready$)/i.test(event.data.body)) {
         // this.log(`startQueuePlugin ignoring message "${event.data.body}" because it didn't match the regex`);
         return;
@@ -204,8 +210,17 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
     }
   }
 
-  // TODO wait rand time < 1 sec if not party leader, and ignore if someone else posts
+  // Multi posts after a delay if a non plugin user uses it (chat has too big latency to ensure that only 1 message gets printed (~425 ms to detect message sent))
   async listReadyToChat(currentSummonerId, chatUrl, requestingSummonerId) {
+    if (currentSummonerId !== requestingSummonerId) {
+      this.statusRequesterResponded = false;
+      await this.sleep(NOT_SELF_MIN_DELAY);
+      if (this.statusRequesterResponded) {
+        this.statusRequesterResponded = false;
+        this.log('Status requester responded themselves, so no need for us to respond as well');
+        return;
+      }
+    }
     const players = await this.getLobbyMembers();
 
     const [playerReadyStatuses, readyPlayers, totalPlayers] = players.data.reduce(([readyStatuses, readyPlayers, totalPlayers], player) => {
@@ -214,7 +229,7 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
       return [readyStatuses, readyPlayers + (isReady ? 1 : 0), totalPlayers + 1];
     }, [[], 10, 10]);
 
-    const readyStatusStr = ['.', `Party ready status (${readyPlayers} / ${totalPlayers}):`].concat(playerReadyStatuses).join("\n");
+    const readyStatusStr = [`${READY_LIST_HEADER} (${readyPlayers} / ${totalPlayers}):`].concat(playerReadyStatuses).join("\n");
     this.sendMessage(chatUrl, readyStatusStr);
   }
 }
