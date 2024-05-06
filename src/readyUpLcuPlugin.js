@@ -9,6 +9,7 @@ const MEMBERS_ENDPOINT = 'lol-lobby/v2/lobby/members';
 const LOBBY_MATCHMAKING_SEARCH_ENDPOINT = 'lol-lobby/v2/lobby/matchmaking/search';
 const CONVERSATIONS_EVENT = 'OnJsonApiEvent_lol-chat_v1_conversations';
 const LOBBY_EVENT = 'OnJsonApiEvent_lol-lobby_v2_comms';
+const MATCHMAKING_EVENT = 'OnJsonApiEvent_lol-matchmaking_v1_search';
 
 const PARTY_RESTRICTION_QUEUES = new Set([490]); // QuickPlay
 
@@ -31,6 +32,7 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
     return this.createPromise((resolve, reject) => {
       this.getCurrentSummoner().then((summonerId) => {
         const finish = () => {
+          this.subscribeEvent(MATCHMAKING_EVENT, this.handleMatchmakingStart);
           this.subscribeEvent(LOBBY_EVENT, this.handlePartyMemberChange(summonerId));
           this.subscribeEvent(CONVERSATIONS_EVENT, this.handleLobbyChat(summonerId));
           this.log('is ready');
@@ -112,6 +114,23 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
 
   getParty() {
     return axios.get(PARTY_ENDPOINT);
+  }
+
+  handleMatchmakingStart(event) {
+    // this.log(JSON.stringify(event, null, 2));
+    if (event.eventType !== 'Create') {
+      return;
+    }
+
+    if (event.data.errors.length > 0) {
+      this.log("Couldn't start queue", event.data.errors);
+      return;
+    }
+
+    this.log('Queue started, clearing readyCheck');
+    for (const key in this.partyMembers) {
+      this.partyMembers[key] = false;
+    }
   }
 
   handlePartyMemberChange(currentSummonerId) {
@@ -205,9 +224,6 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
     }
 
     await this.startQueue();
-    for (const key in this.partyMembers) {
-      this.partyMembers[key] = false;
-    }
   }
 
   // Multi posts after a delay if a non plugin user uses it (chat has too big latency to ensure that only 1 message gets printed (~425 ms to detect message sent))
