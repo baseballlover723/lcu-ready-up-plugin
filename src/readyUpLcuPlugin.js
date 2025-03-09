@@ -10,6 +10,7 @@ const LOBBY_MATCHMAKING_SEARCH_ENDPOINT = 'lol-lobby/v2/lobby/matchmaking/search
 const CONVERSATIONS_EVENT = 'OnJsonApiEvent_lol-chat_v1_conversations';
 const LOBBY_EVENT = 'OnJsonApiEvent_lol-lobby_v2_comms';
 const MATCHMAKING_EVENT = 'OnJsonApiEvent_lol-matchmaking_v1_search';
+const SUMMONER_ENDPOINT = 'lol-summoner/v2/summoners/puuid/';
 
 const PARTY_RESTRICTION_QUEUES = new Set([490]); // QuickPlay
 
@@ -88,6 +89,12 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
       } else {
         this.error('error: ', error);
       }
+    });
+  }
+
+  async getSummonerInfo(puuid) {
+    return axios.get(SUMMONER_ENDPOINT + puuid).catch((error) => {
+      this.error('error: ', error);
     });
   }
 
@@ -173,7 +180,7 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
       if (event.data.body.startsWith(READY_LIST_HEADER)) {
         this.statusRequesterResponded = true;
       }
-      if (!/(^r$)|(^ready$)|(^nr$)|(^not ready$)|(^\/list ready$)/i.test(event.data.body)) {
+      if (!/(^r$)|(^ready$)|(^nr$)|(^not ready$)|(^\/list\s+ready$)/i.test(event.data.body)) {
         // this.log(`startQueuePlugin ignoring message "${event.data.body}" because it didn't match the regex`);
         return;
       }
@@ -239,9 +246,17 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
     }
     const players = await this.getLobbyMembers();
 
+    const nameMap = await Promise.all(players.data.map((player) => this.getSummonerInfo(player.puuid)))
+      .then((resps) => {
+        return resps.reduce((map, resp) => {
+          map[resp.data.summonerId] = `${resp.data.gameName}#${resp.data.tagLine}`;
+          return map;
+        }, {});
+      });
+
     const [playerReadyStatuses, readyPlayers, totalPlayers] = players.data.reduce(([readyStatuses, readyPlayers, totalPlayers], player) => {
       const isReady = this.partyMembers[player.summonerId];
-      readyStatuses.push(`${player.summonerName}: ${isReady ? READY_EMOJI : NOT_READY_EMOJI}`);
+      readyStatuses.push(`${nameMap[player.summonerId]}: ${isReady ? READY_EMOJI : NOT_READY_EMOJI}`);
       return [readyStatuses, readyPlayers + (isReady ? 1 : 0), totalPlayers + 1];
     }, [[], 0, 0]);
 

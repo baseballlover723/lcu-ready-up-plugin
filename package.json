@@ -1,6 +1,6 @@
 {
   "name": "lcu-ready-up-plugin",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "A Plugin for the League of Legends Client that allows people to say they're ready and start the queue when everyone is ready.",
   "type": "module",
   "repository": {
