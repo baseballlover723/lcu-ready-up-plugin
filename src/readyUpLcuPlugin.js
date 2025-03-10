@@ -108,7 +108,7 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
   }
 
   async getLobbyMembers() {
-    return axios.get(MEMBERS_ENDPOINT);
+    return axios.get(MEMBERS_ENDPOINT).catch((error) => this.error(error));;
   }
 
   amLeader(currentSummonerId, players) {
@@ -116,11 +116,11 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
   }
 
   getLobby() {
-    return axios.get(LOBBY_ENDPOINT);
+    return axios.get(LOBBY_ENDPOINT).catch((error) => this.error(error));;
   }
 
   getParty() {
-    return axios.get(PARTY_ENDPOINT);
+    return axios.get(PARTY_ENDPOINT).catch((error) => this.error(error));;
   }
 
   handleMatchmakingStart(event) {
