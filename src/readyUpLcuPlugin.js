@@ -42,8 +42,10 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
         this.isPartyActive().then((isPartyActive) => {
           if (isPartyActive.data) {
             this.getLobbyMembers().then((resp) => {
-              for (const summoner of resp.data) {
-                this.partyMembers[summoner.summonerId] = false;
+              if (resp) {
+                for (const summoner of resp.data) {
+                  this.partyMembers[summoner.summonerId] = false;
+                }
               }
               finish();
             });
