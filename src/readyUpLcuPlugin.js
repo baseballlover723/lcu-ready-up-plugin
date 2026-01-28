@@ -209,6 +209,9 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
     }
 
     const players = await this.getLobbyMembers();
+    if (!players) {
+      this.log("Ignoring because can't find lobby members");
+    }
 
     if (players.data.some((player) => !this.partyMembers[player.summonerId])) {
       this.log('Not all players are ready');
