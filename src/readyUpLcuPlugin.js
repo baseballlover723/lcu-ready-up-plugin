@@ -31,11 +31,11 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
     this.sentMessages = new Set();
 
     return this.createPromise((resolve, reject) => {
-      this.getCurrentSummoner().then((summonerId) => {
+      this.getCurrentSummoner().then((puuid) => {
         const finish = () => {
           this.subscribeEvent(MATCHMAKING_EVENT, this.handleMatchmakingStart);
-          this.subscribeEvent(LOBBY_EVENT, this.handlePartyMemberChange(summonerId));
-          this.subscribeEvent(CONVERSATIONS_EVENT, this.handleLobbyChat(summonerId));
+          this.subscribeEvent(LOBBY_EVENT, this.handlePartyMemberChange(puuid));
+          this.subscribeEvent(CONVERSATIONS_EVENT, this.handleLobbyChat(puuid));
           this.log('is ready');
           resolve();
         };
@@ -44,7 +44,7 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
             this.getLobbyMembers().then((resp) => {
               if (resp) {
                 for (const summoner of resp.data) {
-                  this.partyMembers[summoner.summonerId] = false;
+                  this.partyMembers[summoner.puuid] = false;
                 }
               }
               finish();
@@ -67,7 +67,7 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
 
   getCurrentSummonerHelper(retriesLeft, resolve, reject) {
     axios.get(CURRENT_SUMMONER_ENDPOINT).then((resp) => {
-      resolve(resp.data.summonerId);
+      resolve(resp.data.puuid);
     }).catch((error) => {
       if ((error.code !== 'ECONNREFUSED' && error?.response?.status >= 500) || retriesLeft <= 0) {
         this.log('error in getting current summoner', error);
@@ -113,8 +113,8 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
     return axios.get(MEMBERS_ENDPOINT).catch((error) => this.error(error));;
   }
 
-  amLeader(currentSummonerId, players) {
-    return players.data.some((player) => currentSummonerId === player.summonerId && player.isLeader);
+  amLeader(currentPuuid, players) {
+    return players.data.some((player) => currentPuuid === player.puuid && player.isLeader);
   }
 
   getLobby() {
@@ -142,28 +142,28 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
     }
   }
 
-  handlePartyMemberChange(currentSummonerId) {
+  handlePartyMemberChange(puuid) {
     return async (event) => {
       // this.log("event", JSON.stringify(event, null, 2));
-      const partySummonerIds = new Set(Object.entries(event.data.players).map(([_, value]) => value.summonerId.toString()));
+      const partyPuuids = new Set(Object.entries(event.data.players).map(([_, value]) => value.puuid.toString()));
 
-      for (const summonerId in this.partyMembers) {
-        if (!partySummonerIds.has(summonerId)) {
-          delete this.partyMembers[summonerId];
+      for (const puuid in this.partyMembers) {
+        if (!partyPuuids.has(puuid)) {
+          delete this.partyMembers[puuid];
         }
       }
 
-      partySummonerIds.forEach((summonerId) => {
-        if (!this.partyMembers[summonerId]) {
-          this.partyMembers[summonerId] = false;
+      partyPuuids.forEach((puuid) => {
+        if (!this.partyMembers[puuid]) {
+          this.partyMembers[puuid] = false;
         }
       });
 
-      await this.tryToStartQueue(currentSummonerId);
+      await this.tryToStartQueue(puuid);
     };
   }
 
-  handleLobbyChat(currentSummonerId) {
+  handleLobbyChat(currentPuuid) {
     return async (event) => {
       if (event.eventType !== 'Create') {
         return;
@@ -189,20 +189,20 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
 
       if (event.data.body.toLowerCase().startsWith("/list")) {
         const chatUrl = event.uri.substring(0, event.uri.lastIndexOf('/'));
-        await this.listReadyToChat(currentSummonerId, chatUrl, event.data.fromSummonerId);
+        await this.listReadyToChat(currentPuuid, chatUrl, event.data.fromPuuid);
         return;
       } else if (event.data.body.toLowerCase().startsWith('r')) {
-        this.partyMembers[event.data.fromSummonerId] = true;
+        this.partyMembers[event.data.fromPuuid] = true;
       } else {
-        this.partyMembers[event.data.fromSummonerId] = false;
+        this.partyMembers[event.data.fromPuuid] = false;
         return;
       }
 
-      await this.tryToStartQueue(currentSummonerId);
+      await this.tryToStartQueue(currentPuuid);
     };
   }
 
-  async tryToStartQueue(currentSummonerId) {
+  async tryToStartQueue(currentSummonerPuuid) {
     if (!(await this.isPartyActive()).data) {
       this.log('Ignoring because party is not active');
       return;
@@ -213,12 +213,12 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
       this.log("Ignoring because can't find lobby members");
     }
 
-    if (players.data.some((player) => !this.partyMembers[player.summonerId])) {
+    if (players.data.some((player) => !this.partyMembers[player.puuid])) {
       this.log('Not all players are ready');
       return;
     }
 
-    if (!this.amLeader(currentSummonerId, players)) {
+    if (!this.amLeader(currentSummonerPuuid, players)) {
       this.log('Ignoring since I am not party leader');
       return;
     }
@@ -239,8 +239,8 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
   }
 
   // Multi posts after a delay if a non plugin user uses it (chat has too big latency to ensure that only 1 message gets printed (~425 ms to detect message sent))
-  async listReadyToChat(currentSummonerId, chatUrl, requestingSummonerId) {
-    if (currentSummonerId !== requestingSummonerId) {
+  async listReadyToChat(currentPuuid, chatUrl, requestingPuuid) {
+    if (currentPuuid !== requestingPuuid) {
       this.statusRequesterResponded = false;
       await this.sleep(NOT_SELF_MIN_DELAY);
       if (this.statusRequesterResponded) {
@@ -254,14 +254,14 @@ export default class ReadyUpLcuPlugin extends LcuPlugin {
     const nameMap = await Promise.all(players.data.map((player) => this.getSummonerInfo(player.puuid)))
       .then((resps) => {
         return resps.reduce((map, resp) => {
-          map[resp.data.summonerId] = `${resp.data.gameName}#${resp.data.tagLine}`;
+          map[resp.data.puuid] = `${resp.data.gameName}#${resp.data.tagLine}`;
           return map;
         }, {});
       });
 
     const [playerReadyStatuses, readyPlayers, totalPlayers] = players.data.reduce(([readyStatuses, readyPlayers, totalPlayers], player) => {
-      const isReady = this.partyMembers[player.summonerId];
-      readyStatuses.push(`${nameMap[player.summonerId]}: ${isReady ? READY_EMOJI : NOT_READY_EMOJI}`);
+      const isReady = this.partyMembers[player.puuid];
+      readyStatuses.push(`${nameMap[player.puuid]}: ${isReady ? READY_EMOJI : NOT_READY_EMOJI}`);
       return [readyStatuses, readyPlayers + (isReady ? 1 : 0), totalPlayers + 1];
     }, [[], 0, 0]);
 
